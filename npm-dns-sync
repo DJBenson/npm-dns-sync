@@ -1,0 +1,276 @@
+#!/bin/bash
+
+##########
+# CONFIG #
+##########
+
+ipaddr=$(ip -4 addr show <InterfaceName> | grep -oP '(?<=inet\s)\d+(\.\d+){3}') # Ensure your active NIC is referenced here, e.g. ens19
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+CONFIG_DIR=/path/to/nginxproxymanager/data/nginx/proxy_host # The path to the proxy_host folder of your Nginx Proxy Manager data
+CNAME=somedonain.somehost.tld. # If using a CNAME for internal DNS, set it here. If blank, ipaddr will be used.
+INTERNALDNS=1 # Update internal DNS records (0 = Disabled / 1 = Enabled)
+EXTERNALDNS=1 # Update external DNS records (0 = Disabled / 1 = Enabled)
+
+CF_API_KEY="" # Enter your Cloudflare API key here, must have read/write access to the zone below
+CF_ZONE_ID="" # Enter your Cloudflare zone ID here, this can be found from your account profile page
+CF_IP_ADDR="xxx.xxx.xxx.xxx" # The IP address to which Cloudflare DNS records will point
+CF_RECORD_TYPE="A"
+CF_TTL=1 # 1=Automatic
+CF_PROXIED="false"
+
+##############
+# END CONFIG #
+##############
+
+###################
+# START FUNCTIONS #
+###################
+
+test_dependencies () {
+
+if [[ $INTERNALDNS -ne 1 && $EXTERNALDNS -ne 1 ]]; then
+  echo "All DNS updates are disabled, exiting!"
+  exit
+fi
+
+if ! command -v jq &> /dev/null
+then
+    echo "jq is not installed but is required, install using sudo apt get install -y jq"
+    exit
+fi
+
+if ! command -v curl &> /dev/null
+then
+    echo "curl is not installed but is required, install using sudo apt get install -y curl"
+    exit
+fi
+
+if ! command -v diff &> /dev/null
+then
+    echo "diff is not installed but is required, install using sudo apt get install -y curl"
+    exit
+fi
+
+if [ -z "$CF_API_KEY" ]; then
+   echo "Cloudflare API key is required"
+   exit
+fi
+
+if [[ $INTERNALDNS -ne 1 && $EXTERNALDNS -ne 1 ]]; then
+  echo "All DNS updates are disabled, exiting!"
+  exit
+fi
+
+if ! command -v jq &> /dev/null
+then
+    echo "jq is not installed but is required, install using sudo apt get install -y jq"
+    exit
+fi
+
+if ! command -v curl &> /dev/null
+then
+    echo "curl is not installed but is required, install using sudo apt get install -y curl"
+    exit
+fi
+
+if ! command -v diff &> /dev/null
+then
+    echo "diff is not installed but is required, install using sudo apt get install -y curl"
+    exit
+fi
+
+if [ -z "$CF_API_KEY" ]; then
+   echo "Cloudflare API key is required"
+   exit
+fi
+
+if [ -z "$CF_ZONE_ID" ]; then
+   echo "Cloudflare Zone ID is required"
+   exit
+fi
+
+if [ -z "$CF_IP_ADDR" ]; then
+   echo "Cloudflare IP address is required"
+   exit
+fi
+
+}
+
+cleanup () {
+rm -rf $SCRIPT_DIR/nsupdate.txt
+rm -rf $SCRIPT_DIR/added.hosts
+rm -rf $SCRIPT_DIR/deleted.hosts
+}
+
+get_hosts () {
+for i in $CONFIG_DIR/*.conf; do cat $i | sed -n '2p' | cut -d '#' -f 2 | tr "," "\n" | cut -d ' ' -f2; done 2>/dev/null > $SCRIPT_DIR/latest.hosts
+diff --changed-group-format='%>' --unchanged-group-format='' $SCRIPT_DIR/lastupdate.hosts $SCRIPT_DIR/latest.hosts > $SCRIPT_DIR/added.hosts
+diff --changed-group-format='%>' --unchanged-group-format='' $SCRIPT_DIR/latest.hosts $SCRIPT_DIR/lastupdate.hosts > $SCRIPT_DIR/deleted.hosts
+}
+
+generate_nsupdate () {
+if [ $1 ]; then
+echo "Forcing nsupdate..."
+for i in $(cat $SCRIPT_DIR/lastupdate.hosts); do echo "update delete $i" >> $SCRIPT_DIR/nsupdate.txt; echo "send" >> $SCRIPT_DIR/nsupdate.txt; done
+for i in $(cat $SCRIPT_DIR/lastupdate.hosts); do echo "update add $i 86400 A $ipaddr" >> $SCRIPT_DIR/nsupdate.txt; echo "send" >> $SCRIPT_DIR/nsupdate.txt; done
+else
+echo "Generating nsupdate file..."
+if [ -z $CNAME ]; then
+for i in $(cat $SCRIPT_DIR/deleted.hosts); do echo "update delete $i" >> $SCRIPT_DIR/nsupdate.txt; echo "send" >> $SCRIPT_DIR/nsupdate.txt; done
+for i in $(cat $SCRIPT_DIR/added.hosts); do echo "update add $i 86400 A $ipaddr" >> $SCRIPT_DIR/nsupdate.txt; echo "send" >> $SCRIPT_DIR/nsupdate.txt; done
+else
+for i in $(cat $SCRIPT_DIR/deleted.hosts); do echo "update delete $i" >> $SCRIPT_DIR/nsupdate.txt; echo "send" >> $SCRIPT_DIR/nsupdate.txt; done
+for i in $(cat $SCRIPT_DIR/added.hosts); do echo "update add $i 86400 CNAME $CNAME" >> $SCRIPT_DIR/nsupdate.txt; echo "send" >> $SCRIPT_DIR/nsupdate.txt; done
+fi
+fi
+}
+
+show_stats () {
+countnewhosts=$(wc -l $SCRIPT_DIR/added.hosts | cut -d ' ' -f 1)
+countdeletedhosts=$(wc -l $SCRIPT_DIR/deleted.hosts | cut -d ' ' -f 1)
+echo "Adding $countnewhosts and deleting $countdeletedhosts DNS records..."
+}
+
+handle_result () {
+success=$(echo "$1" | jq -r '.success')
+if [ $success ]; then
+  echo "Success"
+else
+  echo "Error"
+  echo $result | jq -r '.errors[0].message'
+fi
+}
+
+update_cloudflare () {
+
+if [ $1 ]; then
+  echo "Forcing Cloudflare Sync..."
+
+for i in $(cat $SCRIPT_DIR/lastupdate.hosts); do echo "Removing $i..."; target=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records?type=$CF_RECORD_TYPE&name=$i" \
+     -H "Authorization: Bearer $CF_API_KEY" \
+     -H "Content-Type: application/json" | jq -r '.result[0] .id'); result=$(curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$target" \
+     -H "Authorization: Bearer $CF_API_KEY" \
+     -H "Content-Type: application/json") ; handle_result $result; done
+
+for i in $(cat $SCRIPT_DIR/lastupdate.hosts); do echo "Adding $i..."; result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records" \
+     -H "Authorization: Bearer $CF_API_KEY" \
+     -H "Content-Type: application/json" \
+     --data "{\"type\":\"$CF_RECORD_TYPE\",\"name\":\"$i\",\"content\":\"$CF_IP_ADDR\",\"ttl\":$CF_TTL,\"proxied\":$CF_PROXIED}"); handle_result $result; done
+
+else
+
+echo "Updating Cloudflare..."
+
+if [ $countdeletedhosts -gt 0 ]; then
+echo "Removing deleted hosts..."
+fi
+
+for i in $(cat $SCRIPT_DIR/deleted.hosts); do echo "Removing $i..."; target=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records?type=$CF_RECORD_TYPE&name=$i" \
+     -H "Authorization: Bearer $CF_API_KEY" \
+     -H "Content-Type: application/json" | jq -r '.result[0] .id'); result=$(curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$target" \
+     -H "Authorization: Bearer $CF_API_KEY" \
+     -H "Content-Type: application/json") ; handle_result $result; done
+
+if [ $countnewhosts -gt 0 ]; then
+echo "Adding new hosts..."
+fi
+
+for i in $(cat $SCRIPT_DIR/added.hosts); do echo "Adding $i..."; result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records" \
+     -H "Authorization: Bearer $CF_API_KEY" \
+     -H "Content-Type: application/json" \
+     --data "{\"type\":\"$CF_RECORD_TYPE\",\"name\":\"$i\",\"content\":\"$CF_IP_ADDR\",\"ttl\":$CF_TTL,\"proxied\":$CF_PROXIED}"); handle_result $result; done
+fi
+}
+
+perform_nsupdate () {
+if [ $1 ]; then
+echo "Forcing nsupdate..."
+nsupdate $SCRIPT_DIR/nsupdate.txt
+else
+echo "Updating internal DNS..."
+if [ $countdeletedhosts -gt 0 ]; then
+echo "Removing deleted hosts..."
+fi
+
+for i in $(cat $SCRIPT_DIR/deleted.hosts); do echo "Removing $i..."; done
+
+if [ $countnewhosts -gt 0 ]; then
+echo "Adding new hosts..."
+fi
+
+for i in $(cat $SCRIPT_DIR/added.hosts); do echo "Adding $i..."; done
+nsupdate $SCRIPT_DIR/nsupdate.txt
+fi
+}
+
+sync_hosts () {
+echo "Writing log files..."
+cp $SCRIPT_DIR/latest.hosts $SCRIPT_DIR/lastupdate.hosts
+}
+
+#################
+# END FUNCTIONS #
+#################
+
+#################
+# START PROGRAM #
+#################
+
+if [[ ! -z $1 && $1 == "force_sync" ]]; then
+  test_dependencies
+  echo "Force Sync..."
+  if [ $INTERNALDNS ]; then
+    generate_nsupdate true
+    perform_nsupdate true
+    cleanup
+  fi
+
+  if [ $EXTERNALDNS ]; then
+    update_cloudflare true
+    cleanup
+  fi
+  else
+
+test_dependencies
+cleanup
+get_hosts
+
+# Check if lastupdate.hosts file exists
+if test -f $SCRIPT_DIR/lastupdate.hosts; then
+  echo "File exists, checking if the content has changed..."
+  if cmp -s $SCRIPT_DIR/lastupdate.hosts $SCRIPT_DIR/latest.hosts; then
+    echo "File is identical, no DNS update required."
+    cleanup
+  else
+    echo "Host configuration appears to have changed..."
+    show_stats
+    generate_nsupdate
+    if [ $INTERNALDNS ]; then
+    perform_nsupdate
+    fi
+    if [ $EXTERNALDNS ]; then
+    update_cloudflare
+    fi
+    sync_hosts
+    cleanup
+    echo "Done!"
+  fi
+else
+  echo "lastupdate.hosts file does not exist..."
+  show_stats
+  generate_nsupdate
+    if [ $INTERNALDNS ]; then
+    perform_nsupdate
+    fi
+    if [ $EXTERNALDNS ]; then
+    update_cloudflare
+    fi
+  sync_hosts
+  cleanup
+  echo "Done!"
+fi
+fi
+
+###############
+# END PROGRAM #
+###############

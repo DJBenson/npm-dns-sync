@@ -1,5 +1,5 @@
 # npm-dns-sync
-A script to synchronise DNS entries between Nginx Proxy Manager and DNS entries
+A script to synchronise DNS entries between Nginx Proxy Manager and private/public DNS servers
 # Contents
  - [What Is It](#what-is-it)?
  - [Supported DNS Providers](#supported-dns-providers)

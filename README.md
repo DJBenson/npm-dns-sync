@@ -33,7 +33,7 @@ I run an Active Directory domain at home so use Microsoft DNS and this script wo
  - Check you have the required applications installed on the host, at a minimum this script requires;
 	 - bash
 	 - curl (*sudo apt install -y curl*)
-	 - diff (*sudo apt install -y difutils*)
+	 - diff (*sudo apt install -y difutils*
 	 - jq (*sudo apt install -y jq*)
 	 - nsupdate (*sudo apt install -y dnsutils*)
  - Edit the script and set the required variables in the config section
@@ -41,17 +41,18 @@ I run an Active Directory domain at home so use Microsoft DNS and this script wo
  - (Recommended): Add the script to cron to automatically pick up changes (I run the script every minute and changes are replicated in my Microsoft DNS and Cloudflare accounts quickly and reliably).
 	
 The following requires configuring per your install:
-	- The interface name of the ipaddr parameter (e.g. ens19)
-	- CONFIG_DIR - must point to the proxy_host directory of your Nginx Proxy Manager data
-	- CNAME - if you want your internal DNS entries to point to a single CNAME, set this value, otherwise leave it blank and ipaddr (the IP address of the npm host) will be used
-	- INTERNALDNS - set to 0 to disable internal DNS updates or 1 to enable it
-	- EXTERNALDNS - set to 0 to disable internal DNS updates or 1 to enable it
-	- CF_API_KEY - your Cloudflare API key, create one via your control panel
-	- CF_ZONE_ID - the zone for which updates will be made, this can be found from your account profile
-	- CF_IP_ADDR - the IP address to which Cloudflare entries will point
-	- CF_RECORD_TYPE - what type of record to create (default A)
-	- CF_TTL - the TTL of the DNS entries, set to 1 for 'Auto'
-	- CF_PROXIED - set to true to have Cloudflare proxy your connections or false to enable direct connections
+ - The interface name of the ipaddr parameter (e.g. ens19)
+ - CONFIG_DIR - must point to the proxy_host directory of your Nginx Proxy Manager data
+ - CNAME - if you want your internal DNS entries to point to a single CNAME, set this value, otherwise leave it blank and ipaddr (the IP address of the npm host) will be used
+ - INTERNALDNS - set to 0 to disable internal DNS updates or 1 to enable
+   it
+  - EXTERNALDNS - set to 0 to disable internal DNS updates or 1 to enable it
+  - CF_API_KEY - your Cloudflare API key, create one via your control panel
+  - CF_ZONE_ID - the zone for which updates will be made, this can be found from your account profile
+  - CF_IP_ADDR - the IP address to which Cloudflare entries will point
+  - CF_RECORD_TYPE - what type of record to create (default A)
+   - CF_TTL - the TTL of the DNS entries, set to 1 for 'Auto'
+   - CF_PROXIED - set to true to have Cloudflare proxy your connections or false to enable direct connections
 
 On first run, everything will be deemed as "new" so you may receive errors if the script tries to create DNS entries which already exist - you can safely ignore these. I may improve the script at some point to check each entry on the server before calling the add function but it's not on my list of priorities.
 

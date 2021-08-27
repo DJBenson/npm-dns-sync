@@ -33,7 +33,7 @@ I run an Active Directory domain at home so use Microsoft DNS and this script wo
  - Check you have the required applications installed on the host, at a minimum this script requires;
 	 - bash
 	 - curl (*sudo apt install -y curl*)
-         - diff (*sudo apt install -y difutils*
+	 - diff (*sudo apt install -y difutils*
 	 - jq (*sudo apt install -y jq*)
 	 - nsupdate (*sudo apt install -y dnsutils*)
  - Edit the script and set the required variables in the config section
